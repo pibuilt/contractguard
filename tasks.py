@@ -1,43 +1,58 @@
 from celery_app import celery_app
 from db import SessionLocal
-from models import Contract
+from models import Contract, ClauseResult
 import logging
-import pdfplumber
 import os
-import re
+
+from pdfminer.high_level import extract_text
 
 logger = logging.getLogger(__name__)
 
 
 # -------------------------------
-# Text Cleaning
+# Text Extraction (pdfminer)
 # -------------------------------
-def clean_text(text: str) -> str:
-    text = re.sub(r"\n+", "\n", text)
-    text = re.sub(r"(?<!\n)\n(?!\n)", " ", text)
-    text = re.sub(r"[ \t]+", " ", text)
-    text = text.strip()
-    return text
+def extract_text_from_pdf(file_path: str) -> str:
+    try:
+        text = extract_text(file_path)
+        return text or ""
+    except Exception as e:
+        logger.error(f"pdfminer_failed error={str(e)}")
+        return ""
 
 
 # -------------------------------
-# Clause Extraction
+# Clause Extraction (structure-based)
 # -------------------------------
 def extract_clauses(text: str):
     clauses = []
+    current = None
 
-    pattern = r"\n?\d+(?:\.\d+)*\s"
+    lines = text.split("\n")
 
-    splits = re.split(pattern, text)
-
-    for chunk in splits:
-        if not chunk:  # skip None / empty
+    for line in lines:
+        line = line.strip()
+        if not line:
             continue
 
-        chunk = chunk.strip()
+        words = line.split()
+        first = words[0].rstrip(".")
 
-        if len(chunk) > 50:
-            clauses.append(chunk)
+        # detect clause start like 1 / 1.1 / 2.3.4
+        if first.replace(".", "").isdigit() and len(first) < 10:
+            if current:
+                clauses.append(current)
+
+            current = {
+                "clause_number": first,
+                "text": " ".join(words[1:])
+            }
+        else:
+            if current:
+                current["text"] += " " + line
+
+    if current:
+        clauses.append(current)
 
     return clauses
 
@@ -76,27 +91,15 @@ def process_contract(contract_id: int, file_path: str):
             db.commit()
             return
 
-        # 🔥 Optional but very useful (debugging)
         file_size = os.path.getsize(file_path)
         logger.info(
             f"file_found contract_id={contract_id} size={file_size} path={file_path}"
         )
 
         # -------------------------------
-        # Extract text from PDF
+        # Extract text (pdfminer)
         # -------------------------------
-        full_text = ""
-
-        with pdfplumber.open(file_path) as pdf:
-            for page_num, page in enumerate(pdf.pages):
-                text = page.extract_text() or ""
-
-                logger.info(
-                    f"page_extracted contract_id={contract_id} "
-                    f"page={page_num} chars={len(text)}"
-                )
-
-                full_text += text + "\n"
+        full_text = extract_text_from_pdf(file_path)
 
         logger.info(
             f"pdf_extracted contract_id={contract_id} "
@@ -104,30 +107,31 @@ def process_contract(contract_id: int, file_path: str):
         )
 
         # -------------------------------
-        # Clean text
-        # -------------------------------
-        cleaned_text = clean_text(full_text)
-
-        logger.info(
-            f"text_cleaned contract_id={contract_id} "
-            f"cleaned_chars={len(cleaned_text)}"
-        )
-
-        # -------------------------------
         # Extract clauses
         # -------------------------------
-        clauses = extract_clauses(cleaned_text)
+        clauses = extract_clauses(full_text)
+
+        # Save clauses to DB
+        for clause in clauses:
+            clause_result = ClauseResult(
+                contract_id=contract_id,
+                clause_number=clause["clause_number"],
+                clause_text=clause["text"]
+            )
+            db.add(clause_result)
+
+        db.commit()
 
         logger.info(
-            f"clauses_extracted contract_id={contract_id} "
-            f"num_clauses={len(clauses)}"
+            f"clauses_stored contract_id={contract_id} count={len(clauses)}"
         )
 
-        # Preview first few clauses (debugging)
-        for i, clause in enumerate(clauses[:2]):
+        # Preview first few clauses
+        for i, clause in enumerate(clauses[:3]):
             logger.info(
                 f"clause_preview contract_id={contract_id} "
-                f"index={i} length={len(clause)}"
+                f"index={i} number={clause['clause_number']} "
+                f"length={len(clause['text'])}"
             )
 
         # -------------------------------
