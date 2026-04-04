@@ -8,6 +8,8 @@ from db import engine, Base, SessionLocal
 from models import Contract
 from sqlalchemy.orm import Session
 
+from tasks import process_contract
+
 # -------------------------------
 # Config
 # -------------------------------
@@ -136,6 +138,11 @@ async def upload_contract(request: Request, file: UploadFile = File(...)):
         db.close()
 
     logger.info(f"request_id={request_id} stored contract_id={contract.id}")
+
+    # -------------------------------
+    # Enqueue background task   
+    # -------------------------------
+    process_contract.delay(contract.id)
 
     # -------------------------------
     # Response
