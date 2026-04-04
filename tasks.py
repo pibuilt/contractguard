@@ -4,10 +4,47 @@ from models import Contract
 import logging
 import pdfplumber
 import os
+import re
 
 logger = logging.getLogger(__name__)
 
 
+# -------------------------------
+# Text Cleaning
+# -------------------------------
+def clean_text(text: str) -> str:
+    text = re.sub(r"\n+", "\n", text)
+    text = re.sub(r"(?<!\n)\n(?!\n)", " ", text)
+    text = re.sub(r"[ \t]+", " ", text)
+    text = text.strip()
+    return text
+
+
+# -------------------------------
+# Clause Extraction
+# -------------------------------
+def extract_clauses(text: str):
+    clauses = []
+
+    pattern = r"\n?\d+(?:\.\d+)*\s"
+
+    splits = re.split(pattern, text)
+
+    for chunk in splits:
+        if not chunk:  # skip None / empty
+            continue
+
+        chunk = chunk.strip()
+
+        if len(chunk) > 50:
+            clauses.append(chunk)
+
+    return clauses
+
+
+# -------------------------------
+# Celery Task
+# -------------------------------
 @celery_app.task
 def process_contract(contract_id: int, file_path: str):
     db = SessionLocal()
@@ -28,7 +65,7 @@ def process_contract(contract_id: int, file_path: str):
         logger.info(f"processing_started contract_id={contract_id}")
 
         # -------------------------------
-        # File existence check (ADD HERE)
+        # File existence check
         # -------------------------------
         if not os.path.exists(file_path):
             logger.error(
@@ -38,6 +75,12 @@ def process_contract(contract_id: int, file_path: str):
             contract.status = "failed"
             db.commit()
             return
+
+        # 🔥 Optional but very useful (debugging)
+        file_size = os.path.getsize(file_path)
+        logger.info(
+            f"file_found contract_id={contract_id} size={file_size} path={file_path}"
+        )
 
         # -------------------------------
         # Extract text from PDF
@@ -55,17 +98,37 @@ def process_contract(contract_id: int, file_path: str):
 
                 full_text += text + "\n"
 
-        # -------------------------------
-        # Log extraction result
-        # -------------------------------
         logger.info(
             f"pdf_extracted contract_id={contract_id} "
             f"total_chars={len(full_text)}"
         )
 
         # -------------------------------
-        # TEMP: no DB storage yet
+        # Clean text
         # -------------------------------
+        cleaned_text = clean_text(full_text)
+
+        logger.info(
+            f"text_cleaned contract_id={contract_id} "
+            f"cleaned_chars={len(cleaned_text)}"
+        )
+
+        # -------------------------------
+        # Extract clauses
+        # -------------------------------
+        clauses = extract_clauses(cleaned_text)
+
+        logger.info(
+            f"clauses_extracted contract_id={contract_id} "
+            f"num_clauses={len(clauses)}"
+        )
+
+        # Preview first few clauses (debugging)
+        for i, clause in enumerate(clauses[:2]):
+            logger.info(
+                f"clause_preview contract_id={contract_id} "
+                f"index={i} length={len(clause)}"
+            )
 
         # -------------------------------
         # Mark as completed
@@ -81,9 +144,6 @@ def process_contract(contract_id: int, file_path: str):
             exc_info=True
         )
 
-        # -------------------------------
-        # Mark as failed
-        # -------------------------------
         try:
             contract.status = "failed"
             db.commit()
