@@ -3,6 +3,7 @@ from fastapi.responses import JSONResponse
 import logging
 import uuid
 import time
+import os
 
 from db import engine, Base, SessionLocal
 from models import Contract
@@ -14,6 +15,8 @@ from tasks import process_contract
 # Config
 # -------------------------------
 MAX_FILE_SIZE = 5 * 1024 * 1024  # 5MB
+STORAGE_DIR = "storage/contracts"
+os.makedirs(STORAGE_DIR, exist_ok=True)
 
 # -------------------------------
 # Logging
@@ -122,6 +125,18 @@ async def upload_contract(request: Request, file: UploadFile = File(...)):
     logger.info(f"request_id={request_id} received contract upload")
 
     # -------------------------------
+    # Save file to disk
+    # -------------------------------
+    file_id = str(uuid.uuid4())
+    file_path = os.path.join(STORAGE_DIR, f"{file_id}.pdf")
+    file_path = os.path.normpath(file_path)
+
+    with open(file_path, "wb") as f:
+        f.write(content)
+
+    logger.info(f"request_id={request_id} file_saved path={file_path}")
+
+    # -------------------------------
     # Save to DB
     # -------------------------------
     db: Session = SessionLocal()
@@ -142,7 +157,7 @@ async def upload_contract(request: Request, file: UploadFile = File(...)):
     # -------------------------------
     # Enqueue background task   
     # -------------------------------
-    process_contract.delay(contract.id)
+    process_contract.delay(contract.id, file_path)
 
     # -------------------------------
     # Response

@@ -14,5 +14,5 @@ celery_app.conf.update(
     enable_utc=True,
 )
 
-# 👇 IMPORTANT: explicitly import tasks
+# IMPORTANT: ensures tasks are registered
 import tasks
