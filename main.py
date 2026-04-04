@@ -1,8 +1,11 @@
 from fastapi import FastAPI, Request, status
+from fastapi import UploadFile, File, HTTPException
 from fastapi.responses import JSONResponse
 import logging
 import uuid
 import time
+
+MAX_FILE_SIZE = 5 * 1024 * 1024 
 
 logging.basicConfig(
     level=logging.INFO,
@@ -45,6 +48,44 @@ def health_check(request: Request):
         "status": "success",
         "data": {
             "service": "up"
+        }
+    }
+
+@app.post("/contracts", status_code=202)
+async def upload_contract(request: Request, file: UploadFile = File(...)):
+    request_id = request.state.request_id
+
+    if file.content_type != "application/pdf":
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "request_id": request_id,
+                "status": "error",
+                "error_code": "INVALID_FILE_TYPE",
+                "message": "Only PDF files are allowed"
+            }
+        )
+
+    content = await file.read()
+
+    if len(content) > MAX_FILE_SIZE:
+        raise HTTPException(
+            status_code=413,
+            detail={
+                "request_id": request_id,
+                "status": "error",
+                "error_code": "FILE_TOO_LARGE",
+                "message": "File exceeds size limit (5MB)"
+            }
+        )
+
+    logger.info(f"request_id={request_id} received contract upload")
+
+    return {
+        "request_id": request_id,
+        "status": "success",
+        "data": {
+            "message": "Contract received and queued for processing"
         }
     }
 
