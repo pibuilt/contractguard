@@ -6,7 +6,7 @@ import time
 import os
 
 from db import engine, Base, SessionLocal
-from models import Contract
+from models import Contract, ClauseResult
 from sqlalchemy.orm import Session
 
 from tasks import process_contract
@@ -170,6 +170,44 @@ async def upload_contract(request: Request, file: UploadFile = File(...)):
             "message": "Contract received and queued for processing"
         }
     }
+
+# -------------------------------
+# Get Contract Clauses Endpoint
+# -------------------------------
+@app.get("/contracts/{contract_id}/clauses")
+def get_clauses(contract_id: int, request: Request):
+    request_id = request.state.request_id
+
+    db: Session = SessionLocal()
+
+    try:
+        clauses = db.query(ClauseResult).filter(
+            ClauseResult.contract_id == contract_id
+        ).all()
+
+        if not clauses:
+            raise HTTPException(
+                status_code=404,
+                detail={
+                    "error_code": "CLAUSES_NOT_FOUND",
+                    "message": "No clauses found for this contract"
+                }
+            )
+
+        return {
+            "request_id": request_id,
+            "status": "success",
+            "data": [
+                {
+                    "clause_number": c.clause_number,
+                    "text": c.clause_text
+                }
+                for c in clauses
+            ]
+        }
+
+    finally:
+        db.close()
 
 
 # -------------------------------

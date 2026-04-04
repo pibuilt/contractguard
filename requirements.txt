@@ -5,3 +5,4 @@ sqlalchemy
 celery
 redis
 pdfplumber
+pdfminer.six
