@@ -9,6 +9,9 @@ from db import engine, Base, SessionLocal
 from models import Contract, ClauseResult
 from sqlalchemy.orm import Session
 
+from services.embedding_service import EmbeddingService
+from services.vector_instance import vector_store
+
 from tasks import process_contract
 
 # -------------------------------
@@ -33,7 +36,7 @@ logger = logging.getLogger(__name__)
 # App Init
 # -------------------------------
 app = FastAPI()
-
+embedding_service = EmbeddingService()
 # -------------------------------
 # Middleware
 # -------------------------------
@@ -69,6 +72,7 @@ async def add_request_id_and_logging(request: Request, call_next):
 @app.on_event("startup")
 def on_startup():
     Base.metadata.create_all(bind=engine)
+    vector_store.load("storage/faiss")
     logger.info("Database initialized")
 
 
@@ -242,7 +246,104 @@ async def http_exception_handler(request: Request, exc: HTTPException):
         }
     )
 
+@app.get("/search")
+def search_clauses(
+    request: Request,
+    query: str,
+    k: int = 5
+):
+    request_id = request.state.request_id
+    start_time = time.time()
 
+    db: Session = SessionLocal()
+
+    try:
+        # -------------------------------
+        # Handle empty index before FAISS search
+        # -------------------------------
+        if len(vector_store.id_map) == 0:
+            return {
+                "request_id": request_id,
+                "status": "success",
+                "data": {
+                    "query": query,
+                    "results": []
+                }
+            }
+
+        # -------------------------------
+        # Encode query
+        # -------------------------------
+        t0 = time.time()
+        query_embedding = embedding_service.encode([query])[0]
+        embedding_time = time.time() - t0
+
+        # -------------------------------
+        # FAISS search
+        # -------------------------------
+        t1 = time.time()
+        clause_ids = vector_store.search(query_embedding, k=k)
+        faiss_time = time.time() - t1
+
+        if not clause_ids:
+            return {
+                "request_id": request_id,
+                "status": "success",
+                "data": {
+                    "query": query,
+                    "results": []
+                }
+            }
+
+        # -------------------------------
+        # Fetch from DB
+        # -------------------------------
+        clauses = db.query(ClauseResult).filter(
+            ClauseResult.id.in_(clause_ids)
+        ).all()
+
+        # -------------------------------
+        # 🔥 PRESERVE FAISS ORDER (IMPORTANT FIX)
+        # -------------------------------
+        clause_map = {c.id: c for c in clauses}
+
+        ordered_results = []
+        for cid in clause_ids:
+            c = clause_map.get(cid)
+            if c:
+                ordered_results.append({
+                    "clause_id": c.id,
+                    "contract_id": c.contract_id,
+                    "clause_number": c.clause_number,
+                    "text": c.text
+                })
+
+        total_time = time.time() - start_time
+
+        # -------------------------------
+        # Logging
+        # -------------------------------
+        logger.info(
+            f"request_id={request_id} "
+            f"search_query='{query}' "
+            f"results={len(ordered_results)} "
+            f"embedding_time={embedding_time:.4f}s "
+            f"faiss_time={faiss_time:.4f}s "
+            f"total_time={total_time:.4f}s"
+        )
+
+        return {
+            "request_id": request_id,
+            "status": "success",
+            "data": {
+                "query": query,
+                "results": ordered_results
+            }
+        }
+
+    finally:
+        db.close()
+        
 # -------------------------------
 # Global Exception Handler
 # -------------------------------

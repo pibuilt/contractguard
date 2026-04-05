@@ -4,9 +4,15 @@ from models import Contract, ClauseResult
 import logging
 import os
 
+from services.embedding_service import EmbeddingService
+from services.vector_instance import vector_store
+
 from pdfminer.high_level import extract_text
 
 logger = logging.getLogger(__name__)
+
+# ✅ Load once per worker process (IMPORTANT)
+embedding_service = EmbeddingService()
 
 
 # -------------------------------
@@ -38,7 +44,6 @@ def extract_clauses(text: str):
         words = line.split()
         first = words[0].rstrip(".")
 
-        # Improved clause detection
         is_clause_number = (
             first.replace(".", "").isdigit()
             and first.count(".") <= 3
@@ -71,14 +76,13 @@ def process_contract(contract_id: int, file_path: str):
     db = SessionLocal()
 
     try:
-        # ✅ FIXED: modern SQLAlchemy
         contract = db.get(Contract, contract_id)
 
         if not contract:
             logger.error(f"contract_not_found contract_id={contract_id}")
             return
 
-        # 🚨 IDENTITY GUARD (prevents duplicate execution)
+        # 🚨 Idempotency guard
         if contract.status == "processing":
             logger.warning(f"duplicate_task_detected contract_id={contract_id}")
             return
@@ -92,7 +96,7 @@ def process_contract(contract_id: int, file_path: str):
         logger.info(f"processing_started contract_id={contract_id}")
 
         # -------------------------------
-        # Idempotency cleanup (delete old clauses)
+        # Cleanup old clauses (idempotent)
         # -------------------------------
         db.query(ClauseResult).filter(
             ClauseResult.contract_id == contract_id
@@ -100,7 +104,7 @@ def process_contract(contract_id: int, file_path: str):
         db.commit()
 
         # -------------------------------
-        # File existence check
+        # File check
         # -------------------------------
         if not os.path.exists(file_path):
             logger.error(
@@ -113,7 +117,7 @@ def process_contract(contract_id: int, file_path: str):
 
         file_size = os.path.getsize(file_path)
         logger.info(
-            f"file_found contract_id={contract_id} size={file_size} path={file_path}"
+            f"file_found contract_id={contract_id} size={file_size}"
         )
 
         # -------------------------------
@@ -126,13 +130,11 @@ def process_contract(contract_id: int, file_path: str):
         )
 
         # -------------------------------
-        # Extract clauses (structured)
+        # Extract clauses
         # -------------------------------
         clauses = extract_clauses(full_text)
 
-        # -------------------------------
-        # Fallback for messy contracts
-        # -------------------------------
+        # Fallback
         if not clauses:
             logger.warning(
                 f"no_structured_clauses contract_id={contract_id}, using fallback"
@@ -145,40 +147,65 @@ def process_contract(contract_id: int, file_path: str):
             ]
 
             clauses = [
-                {
-                    "clause_number": None,
-                    "text": p
-                }
+                {"clause_number": None, "text": p}
                 for p in paragraphs
             ]
 
         # -------------------------------
-        # Save clauses to DB
+        # Store clauses (IMPORTANT FIX)
         # -------------------------------
+        clause_objects = []
+
         for clause in clauses:
-            clause_result = ClauseResult(
+            obj = ClauseResult(
                 contract_id=contract_id,
                 clause_number=clause["clause_number"],
-                text=clause["text"]  # ✅ FIXED FIELD NAME
+                text=clause["text"]
             )
-            db.add(clause_result)
+            db.add(obj)
+            clause_objects.append(obj)
 
-        db.commit()
+        db.commit()  # IDs now available
 
         logger.info(
-            f"clauses_stored contract_id={contract_id} count={len(clauses)}"
+            f"clauses_stored contract_id={contract_id} count={len(clause_objects)}"
         )
 
-        # Preview first few clauses
-        for i, clause in enumerate(clauses[:3]):
-            logger.info(
-                f"clause_preview contract_id={contract_id} "
-                f"index={i} number={clause['clause_number']} "
-                f"length={len(clause['text'])}"
+        # -------------------------------
+        # 🔥 FAISS INTEGRATION
+        # -------------------------------
+        try:
+            texts = [c.text for c in clause_objects]
+            ids = [c.id for c in clause_objects]
+
+            if texts:
+                embeddings = embedding_service.encode(texts)
+
+                vector_store.add(embeddings, ids)
+                vector_store.save("storage/faiss")
+
+                logger.info(
+                    f"faiss_index_updated contract_id={contract_id} vectors_added={len(ids)}"
+                )
+
+        except Exception as e:
+            logger.error(
+                f"faiss_index_failed contract_id={contract_id} error={str(e)}",
+                exc_info=True
             )
 
         # -------------------------------
-        # Mark as completed
+        # Preview logs
+        # -------------------------------
+        for i, clause in enumerate(clause_objects[:3]):
+            logger.info(
+                f"clause_preview contract_id={contract_id} "
+                f"index={i} number={clause.clause_number} "
+                f"length={len(clause.text)}"
+            )
+
+        # -------------------------------
+        # Mark completed
         # -------------------------------
         contract.status = "completed"
         db.commit()
@@ -186,7 +213,7 @@ def process_contract(contract_id: int, file_path: str):
         logger.info(f"processing_completed contract_id={contract_id}")
 
     except Exception as e:
-        db.rollback()  # ✅ CRITICAL FIX
+        db.rollback()
 
         logger.error(
             f"processing_failed contract_id={contract_id} error={str(e)}",

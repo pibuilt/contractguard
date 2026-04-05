@@ -6,3 +6,5 @@ celery
 redis
 pdfplumber
 pdfminer.six
+sentence-transformers
+faiss-cpu
