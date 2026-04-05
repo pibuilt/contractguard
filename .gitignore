@@ -5,3 +5,4 @@ __pycache__/
 venv/
 *.db
 storage/
+Text-to-PDF-OCo.pdf

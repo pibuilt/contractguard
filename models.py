@@ -2,6 +2,7 @@ from sqlalchemy import Column, Integer, String, DateTime, ForeignKey, Text
 from sqlalchemy.orm import relationship
 from datetime import datetime
 from db import Base
+import uuid
 
 
 class Contract(Base):
@@ -15,10 +16,12 @@ class Contract(Base):
 class ClauseResult(Base):
     __tablename__ = "clause_results"
 
-    id = Column(Integer, primary_key=True, index=True)
+    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
     contract_id = Column(Integer, ForeignKey("contracts.id"), nullable=False)
 
-    clause_number = Column(String, nullable=False)
-    clause_text = Column(Text, nullable=False)
+    clause_number = Column(String, nullable=True)  # IMPORTANT
+    text = Column(Text, nullable=False)
+
+    created_at = Column(DateTime, default=datetime.utcnow)
 
     contract = relationship("Contract", backref="clauses")

@@ -38,8 +38,14 @@ def extract_clauses(text: str):
         words = line.split()
         first = words[0].rstrip(".")
 
-        # detect clause start like 1 / 1.1 / 2.3.4
-        if first.replace(".", "").isdigit() and len(first) < 10:
+        # Improved clause detection
+        is_clause_number = (
+            first.replace(".", "").isdigit()
+            and first.count(".") <= 3
+            and len(first) <= 6
+        )
+
+        if is_clause_number:
             if current:
                 clauses.append(current)
 
@@ -65,10 +71,16 @@ def process_contract(contract_id: int, file_path: str):
     db = SessionLocal()
 
     try:
-        contract = db.query(Contract).get(contract_id)
+        # ✅ FIXED: modern SQLAlchemy
+        contract = db.get(Contract, contract_id)
 
         if not contract:
             logger.error(f"contract_not_found contract_id={contract_id}")
+            return
+
+        # 🚨 IDENTITY GUARD (prevents duplicate execution)
+        if contract.status == "processing":
+            logger.warning(f"duplicate_task_detected contract_id={contract_id}")
             return
 
         # -------------------------------
@@ -78,6 +90,14 @@ def process_contract(contract_id: int, file_path: str):
         db.commit()
 
         logger.info(f"processing_started contract_id={contract_id}")
+
+        # -------------------------------
+        # Idempotency cleanup (delete old clauses)
+        # -------------------------------
+        db.query(ClauseResult).filter(
+            ClauseResult.contract_id == contract_id
+        ).delete()
+        db.commit()
 
         # -------------------------------
         # File existence check
@@ -97,26 +117,49 @@ def process_contract(contract_id: int, file_path: str):
         )
 
         # -------------------------------
-        # Extract text (pdfminer)
+        # Extract text
         # -------------------------------
         full_text = extract_text_from_pdf(file_path)
 
         logger.info(
-            f"pdf_extracted contract_id={contract_id} "
-            f"total_chars={len(full_text)}"
+            f"pdf_extracted contract_id={contract_id} total_chars={len(full_text)}"
         )
 
         # -------------------------------
-        # Extract clauses
+        # Extract clauses (structured)
         # -------------------------------
         clauses = extract_clauses(full_text)
 
+        # -------------------------------
+        # Fallback for messy contracts
+        # -------------------------------
+        if not clauses:
+            logger.warning(
+                f"no_structured_clauses contract_id={contract_id}, using fallback"
+            )
+
+            paragraphs = [
+                p.strip()
+                for p in full_text.split("\n\n")
+                if len(p.strip()) > 30
+            ]
+
+            clauses = [
+                {
+                    "clause_number": None,
+                    "text": p
+                }
+                for p in paragraphs
+            ]
+
+        # -------------------------------
         # Save clauses to DB
+        # -------------------------------
         for clause in clauses:
             clause_result = ClauseResult(
                 contract_id=contract_id,
                 clause_number=clause["clause_number"],
-                clause_text=clause["text"]
+                text=clause["text"]  # ✅ FIXED FIELD NAME
             )
             db.add(clause_result)
 
@@ -143,6 +186,8 @@ def process_contract(contract_id: int, file_path: str):
         logger.info(f"processing_completed contract_id={contract_id}")
 
     except Exception as e:
+        db.rollback()  # ✅ CRITICAL FIX
+
         logger.error(
             f"processing_failed contract_id={contract_id} error={str(e)}",
             exc_info=True

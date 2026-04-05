@@ -177,38 +177,51 @@ async def upload_contract(request: Request, file: UploadFile = File(...)):
 @app.get("/contracts/{contract_id}/clauses")
 def get_clauses(contract_id: int, request: Request):
     request_id = request.state.request_id
-
     db: Session = SessionLocal()
 
     try:
+        # -------------------------------
+        # Check contract exists
+        # -------------------------------
+        contract = db.get(Contract, contract_id)
+
+        if not contract:
+            raise HTTPException(
+                status_code=404,
+                detail={
+                    "error_code": "CONTRACT_NOT_FOUND",
+                    "message": "Contract does not exist"
+                }
+            )
+
+        # -------------------------------
+        # Fetch clauses
+        # -------------------------------
         clauses = db.query(ClauseResult).filter(
             ClauseResult.contract_id == contract_id
         ).all()
 
-        if not clauses:
-            raise HTTPException(
-                status_code=404,
-                detail={
-                    "error_code": "CLAUSES_NOT_FOUND",
-                    "message": "No clauses found for this contract"
-                }
-            )
-
+        # -------------------------------
+        # Return response (NO 404 for empty)
+        # -------------------------------
         return {
             "request_id": request_id,
             "status": "success",
-            "data": [
-                {
-                    "clause_number": c.clause_number,
-                    "text": c.clause_text
-                }
-                for c in clauses
-            ]
+            "data": {
+                "contract_id": contract_id,
+                "status": contract.status,
+                "clauses": [
+                    {
+                        "clause_number": c.clause_number,
+                        "text": c.text
+                    }
+                    for c in clauses
+                ]
+            }
         }
 
     finally:
         db.close()
-
 
 # -------------------------------
 # HTTP Exception Handler
