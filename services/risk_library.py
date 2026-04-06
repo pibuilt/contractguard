@@ -5,7 +5,17 @@ RISK_LIBRARY = [
         "risk_type": "Payment Delay",
         "description": "Payment terms are vague or allow excessive delay, impacting cash flow.",
         "severity": "high",
-        "keywords": ["delay", "net 60", "net 90", "late payment", "deferred"],
+        "keywords": [
+                "delay",
+                "net 60",
+                "net 90",
+                "90 days",
+                "60 days",
+                "late payment",
+                "deferred",
+                "payment shall be made within",
+                "invoice within"
+            ],
         "embedding_hint": "payment terms that allow delayed or unclear payment obligations"
     },
     {

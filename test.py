@@ -1,13 +1,5 @@
-from services.embedding_service import EmbeddingService
-from services.vector_instance import vector_store
+from services.risk_detector import detect_risks
 
-embedding_service = EmbeddingService()
+clause = "The payment shall be made within 90 days of invoice."
 
-print("Vector size:", len(vector_store.id_map))
-
-query = "payment terms"
-query_embedding = embedding_service.encode([query])[0]
-
-results = vector_store.search(query_embedding, k=3)
-
-print("Results:", results)
+print(detect_risks(clause))

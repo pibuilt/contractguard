@@ -4,16 +4,13 @@ from models import Contract, ClauseResult
 import logging
 import os
 
-from services.embedding_service import EmbeddingService
 from services.vector_instance import vector_store
+from services.risk_detector import detect_risks
+from services.embedding_instance import embedding_service
 
 from pdfminer.high_level import extract_text
 
 logger = logging.getLogger(__name__)
-
-# ✅ Load once per worker process (IMPORTANT)
-embedding_service = EmbeddingService()
-
 
 # -------------------------------
 # Text Extraction (pdfminer)
@@ -167,9 +164,34 @@ def process_contract(contract_id: int, file_path: str):
 
         db.commit()  # IDs now available
 
-        logger.info(
-            f"clauses_stored contract_id={contract_id} count={len(clause_objects)}"
-        )
+        # -------------------------------
+        # 🔥 RISK DETECTION (NEW)
+        # -------------------------------
+        try:
+            total_risks = 0
+
+            for clause in clause_objects:
+                risks = detect_risks(clause.text)
+
+                if risks:
+                    total_risks += len(risks)
+
+                    logger.info(
+                        f"risk_detected contract_id={contract_id} "
+                        f"clause_id={clause.id} risks={len(risks)} "
+                        f"types={[r['risk_type'] for r in risks]}"
+                    )
+
+            logger.info(
+                f"risk_summary contract_id={contract_id} total_risks={total_risks}"
+            )
+
+        except Exception as e:
+
+            logger.error(
+                f"risk_detection_failed contract_id={contract_id} error={str(e)}",
+                exc_info=True
+            )
 
         # -------------------------------
         # 🔥 FAISS INTEGRATION
