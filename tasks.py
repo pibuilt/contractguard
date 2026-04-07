@@ -1,8 +1,9 @@
 from celery_app import celery_app
 from db import SessionLocal
-from models import Contract, ClauseResult
+from models import Contract, ClauseResult, ContractRisk
 import logging
 import os
+import uuid
 
 from services.vector_instance import vector_store
 from services.risk_detector import detect_risks
@@ -97,7 +98,14 @@ def process_contract(contract_id: int, file_path: str):
         # -------------------------------
         db.query(ClauseResult).filter(
             ClauseResult.contract_id == contract_id
-        ).delete()
+        ).delete(synchronize_session=False)
+        db.commit()
+        # -------------------------------
+        # Cleanup old risks (idempotent)
+        # -------------------------------
+        db.query(ContractRisk).filter(
+            ContractRisk.contract_id == contract_id
+        ).delete(synchronize_session=False)
         db.commit()
 
         # -------------------------------
@@ -182,17 +190,39 @@ def process_contract(contract_id: int, file_path: str):
                         f"types={[r['risk_type'] for r in risks]}"
                     )
 
+                    # ✅ NEW: Persist risks
+                    for risk in risks:
+                        if not all(k in risk for k in ["risk_type", "severity", "confidence"]):
+                            logger.warning(
+                                    f"invalid_risk_format contract_id={contract_id} clause_id={clause.id} risk={risk}"
+                            )
+                            continue
+
+                        db.add(ContractRisk(
+                            id=str(uuid.uuid4()),
+                            contract_id=contract_id,
+                            clause_id=clause.id,
+                            risk_type=risk["risk_type"],
+                            severity=risk["severity"],
+                            confidence=risk["confidence"],
+                            explanation=None
+                        ))
+
+            # ✅ IMPORTANT: commit ONCE after loop
+            db.commit()
+
             logger.info(
                 f"risk_summary contract_id={contract_id} total_risks={total_risks}"
             )
 
         except Exception as e:
 
+            db.rollback()  
+
             logger.error(
                 f"risk_detection_failed contract_id={contract_id} error={str(e)}",
                 exc_info=True
             )
-
         # -------------------------------
         # 🔥 FAISS INTEGRATION
         # -------------------------------
