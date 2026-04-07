@@ -6,7 +6,7 @@ import time
 import os
 
 from db import engine, Base, SessionLocal
-from models import Contract, ClauseResult
+from models import Contract, ClauseResult, ContractRisk
 from sqlalchemy.orm import Session
 
 from services.embedding_service import EmbeddingService
@@ -222,6 +222,63 @@ def get_clauses(contract_id: int, request: Request):
                     for c in clauses
                 ]
             }
+        }
+
+    finally:
+        db.close()
+
+@app.get("/contracts/{contract_id}/analysis")
+def get_contract_analysis(contract_id: int):
+    db = SessionLocal()
+
+    try:
+        contract = db.get(Contract, contract_id)
+
+        if not contract:
+            raise HTTPException(status_code=404, detail="CONTRACT_NOT_FOUND")
+
+        # If still processing
+        if contract.status != "completed":
+            return {
+                "contract_id": contract_id,
+                "status": contract.status,
+                "risks": []
+            }
+
+        # Get risks
+        risks = db.query(ContractRisk).filter(
+            ContractRisk.contract_id == contract_id
+        ).all()
+
+        # Map clause_id → clause
+        clause_map = {
+            c.id: c for c in db.query(ClauseResult).filter(
+                ClauseResult.contract_id == contract_id
+            ).all()
+        }
+
+        response = []
+
+        for risk in risks:
+            clause = clause_map.get(risk.clause_id)
+
+            if not clause:
+                continue  # safety
+
+            response.append({
+                "clause_number": clause.clause_number,
+                "text": clause.text,
+                "risk_type": risk.risk_type,
+                "explanation": risk.explanation,
+                "confidence": risk.confidence
+            })
+
+        response.sort(key=lambda x: x["confidence"], reverse=True)
+
+        return {
+            "contract_id": contract_id,
+            "status": "completed",
+            "risks": response
         }
 
     finally:

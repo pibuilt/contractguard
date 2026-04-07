@@ -8,6 +8,7 @@ import uuid
 from services.vector_instance import vector_store
 from services.risk_detector import detect_risks
 from services.embedding_instance import embedding_service
+from services.explanation_service import generate_explanation
 
 from pdfminer.high_level import extract_text
 
@@ -205,7 +206,7 @@ def process_contract(contract_id: int, file_path: str):
                             risk_type=risk["risk_type"],
                             severity=risk["severity"],
                             confidence=risk["confidence"],
-                            explanation=None
+                            explanation=generate_explanation(risk["risk_type"])
                         ))
 
             # ✅ IMPORTANT: commit ONCE after loop
