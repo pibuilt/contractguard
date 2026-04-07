@@ -5,6 +5,7 @@ import logging
 import os
 import uuid
 
+from services.llm_service import llm_service, build_prompt
 from services.vector_instance import vector_store
 from services.risk_detector import detect_risks
 from services.embedding_instance import embedding_service
@@ -199,6 +200,19 @@ def process_contract(contract_id: int, file_path: str):
                             )
                             continue
 
+                        prompt = build_prompt(clause.text, risk["risk_type"])
+
+                        try:
+                            llm_output = llm_service.generate(prompt)
+                            logger.info(
+                                f"llm_generated contract_id={contract_id} clause_id={clause.id}"
+                            )
+                        except Exception:
+                            llm_output = generate_explanation(risk["risk_type"])
+                            logger.warning(
+                                f"llm_fallback_used contract_id={contract_id} clause_id={clause.id}"
+                            )
+
                         db.add(ContractRisk(
                             id=str(uuid.uuid4()),
                             contract_id=contract_id,
@@ -206,7 +220,7 @@ def process_contract(contract_id: int, file_path: str):
                             risk_type=risk["risk_type"],
                             severity=risk["severity"],
                             confidence=risk["confidence"],
-                            explanation=generate_explanation(risk["risk_type"])
+                            explanation=llm_output
                         ))
 
             # ✅ IMPORTANT: commit ONCE after loop
