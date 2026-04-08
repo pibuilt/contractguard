@@ -2,34 +2,43 @@ import { useState } from "react";
 import { api } from "../api/client";
 
 export default function Upload({ onUploaded }: any) {
-  const [file, setFile] = useState<File | null>(null);
+  const [files, setFiles] = useState<File[]>([]);
 
   const handleUpload = async () => {
-    if (!file) return alert("Select a file");
+    if (files.length === 0) return alert("Select files");
 
-    const formData = new FormData();
-    formData.append("file", file);
+    for (const file of files) {
+      const formData = new FormData();
+      formData.append("file", file);
 
-    try {
       const res = await api.post("/contracts", formData, {
         headers: { "Content-Type": "multipart/form-data" },
       });
 
       const contractId = res.data.data.contract_id;
-      onUploaded(contractId);
-    } catch (err) {
-      console.error(err);
-      alert("Upload failed");
+
+      onUploaded(contractId); // send each job up
     }
+
+    setFiles([]); // clear selection
   };
 
   return (
-    <div>
+    <div className="card">
+      <h2>Upload Contracts</h2>
+
       <input
+        className="input"
         type="file"
-        onChange={(e) => setFile(e.target.files?.[0] || null)}
+        multiple
+        onChange={(e) => setFiles(Array.from(e.target.files || []))}
       />
-      <button onClick={handleUpload}>Upload</button>
+
+      <br />
+
+      <button className="button" onClick={handleUpload}>
+        Upload
+      </button>
     </div>
   );
 }
