@@ -6,3 +6,6 @@ venv/
 *.db
 storage/
 Text-to-PDF-OCo.pdf
+Vendor.pdf
+ProfessionalServices.pdf
+Software.pdf
