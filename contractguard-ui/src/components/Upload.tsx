@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { api } from "../api/client";
 
-export default function Upload() {
+export default function Upload({ onUploaded }: any) {
   const [file, setFile] = useState<File | null>(null);
 
   const handleUpload = async () => {
@@ -15,7 +15,8 @@ export default function Upload() {
         headers: { "Content-Type": "multipart/form-data" },
       });
 
-      alert(`Uploaded! Contract ID: ${res.data.data.contract_id}`);
+      const contractId = res.data.data.contract_id;
+      onUploaded(contractId);
     } catch (err) {
       console.error(err);
       alert("Upload failed");
