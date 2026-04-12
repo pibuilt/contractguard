@@ -1,10 +1,17 @@
 # -------- BUILD STAGE --------
 FROM python:3.10-slim AS builder
 
-WORKDIR /install
+WORKDIR /app
 
+# Install torch first (heavy dep)
+RUN pip install --no-cache-dir \
+https://download.pytorch.org/whl/cpu/torch-2.2.2%2Bcpu-cp310-cp310-linux_x86_64.whl
+
+# Copy requirements
 COPY requirements.worker.txt .
-RUN pip install --no-cache-dir --prefix=/install -r requirements.worker.txt
+
+# Install ALL deps directly into system site-packages
+RUN pip install --no-cache-dir -r requirements.worker.txt
 
 
 # -------- RUNTIME STAGE --------
@@ -12,11 +19,13 @@ FROM python:3.10-slim
 
 WORKDIR /app
 
-# Copy installed deps
-COPY --from=builder /install /usr/local
+# Copy full Python environment (correct path)
+COPY --from=builder /usr/local /usr/local
 
 # Copy code
 COPY worker/ worker/
 COPY backend/ backend/
+COPY shared/ shared/
 
-CMD ["celery", "-A", "worker.celery_app", "worker", "--loglevel=info", "--pool=solo"]
+# Run worker
+CMD ["celery", "-A", "worker.celery_app:celery_app", "worker", "--loglevel=info", "--pool=solo"]

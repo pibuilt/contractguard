@@ -1,10 +1,10 @@
-from worker.celery_app import celery_app
+from shared.celery_app import celery_app
 from backend.db import SessionLocal
 from backend.models import Contract, ClauseResult, ContractRisk
 import logging
 import os
 import uuid
-
+import numpy as np
 from pdfminer.high_level import extract_text
 
 logger = logging.getLogger(__name__)
@@ -240,20 +240,28 @@ def process_contract(contract_id: int, file_path: str):
                 exc_info=True
             )
         # -------------------------------
-        # 🔥 FAISS INTEGRATION
+        # 🔥 FAISS INTEGRATION (FIXED)
         # -------------------------------
         try:
             texts = [c.text for c in clause_objects]
-            ids = [c.id for c in clause_objects]
 
             if texts:
                 embeddings = embedding_service.encode(texts)
+
+                # ✅ convert to numpy (CRITICAL)
+                embeddings = np.array(embeddings).astype("float32")
+
+                if len(embeddings.shape) == 1:
+                    embeddings = embeddings.reshape(1, -1)
+
+                valid_count = len(embeddings)
+                ids = [str(clause_objects[i].id) for i in range(valid_count)]
 
                 vector_store.add(embeddings, ids)
                 vector_store.save("storage/faiss")
 
                 logger.info(
-                    f"faiss_index_updated contract_id={contract_id} vectors_added={len(ids)}"
+                    f"faiss_index_updated contract_id={contract_id} vectors_added={valid_count}"
                 )
 
         except Exception as e:
@@ -261,7 +269,6 @@ def process_contract(contract_id: int, file_path: str):
                 f"faiss_index_failed contract_id={contract_id} error={str(e)}",
                 exc_info=True
             )
-
         # -------------------------------
         # Preview logs
         # -------------------------------

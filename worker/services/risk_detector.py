@@ -1,11 +1,4 @@
-import numpy as np
 from worker.services.risk_library import RISK_LIBRARY
-from worker.services.embedding_instance import embedding_service
-
-# Precompute risk embeddings ONCE
-RISK_HINT_EMBEDDINGS = embedding_service.encode(
-    [r["embedding_hint"] for r in RISK_LIBRARY]
-)
 
 
 def keyword_match_score(clause_text: str, keywords: list[str]) -> float:
@@ -17,18 +10,15 @@ def keyword_match_score(clause_text: str, keywords: list[str]) -> float:
 def detect_risks(clause_text: str):
     if not clause_text or not clause_text.strip():
         return []
-    
+
     results = []
 
-    clause_embedding = embedding_service.encode([clause_text])[0]
-
-    for i, risk in enumerate(RISK_LIBRARY):
+    for risk in RISK_LIBRARY:
         kw_score = keyword_match_score(clause_text, risk["keywords"])
-        emb_score = float(np.dot(clause_embedding, RISK_HINT_EMBEDDINGS[i]))
 
-        final_score = 0.6 * emb_score + 0.4 * kw_score
+        final_score = kw_score
 
-        if final_score > 0.4:
+        if final_score > 0.3:  # slightly lower threshold
             results.append({
                 "risk_type": risk["risk_type"],
                 "severity": risk["severity"],

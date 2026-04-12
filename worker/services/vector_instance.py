@@ -1,3 +1,3 @@
 from worker.services.vector_store import VectorStore
 
-vector_store = VectorStore(dimension=384)
+vector_store = VectorStore()

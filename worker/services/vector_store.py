@@ -5,18 +5,17 @@ import os
 import pickle
 
 class VectorStore:
-    def __init__(self, dimension: int):
-        self.dimension = dimension
-
-        # L2 index (we'll normalize later for cosine)
-        self.index = faiss.IndexFlatL2(dimension)
-
-        # mapping: index position → clause_id
+    def __init__(self):
+        self.index = None
         self.id_map = []
 
     def add(self, embeddings: np.ndarray, ids: List[int]):
         if len(embeddings) != len(ids):
             raise ValueError("Embeddings and IDs must match")
+
+        if self.index is None:
+            dim = embeddings.shape[1]
+            self.index = faiss.IndexFlatL2(dim)
 
         self.index.add(embeddings)
         self.id_map.extend(ids)
@@ -35,15 +34,15 @@ class VectorStore:
                 results.append(self.id_map[idx])
 
         return results
-    
+
     def save(self, path: str):
         os.makedirs(path, exist_ok=True)
 
-        faiss.write_index(self.index, os.path.join(path, "index.faiss"))
+        if self.index:
+            faiss.write_index(self.index, os.path.join(path, "index.faiss"))
 
         with open(os.path.join(path, "id_map.pkl"), "wb") as f:
             pickle.dump(self.id_map, f)
-
 
     def load(self, path: str):
         index_path = os.path.join(path, "index.faiss")

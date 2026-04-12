@@ -10,6 +10,9 @@ services:
       - redis
     environment:
       - PYTHONUNBUFFERED=1
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
+    volumes:
+      - ./storage:/app/storage
 
   worker:
     build:
@@ -20,6 +23,9 @@ services:
       - redis
     environment:
       - PYTHONUNBUFFERED=1
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
+    volumes:
+      - ./storage:/app/storage
 
   redis:
     image: redis:7

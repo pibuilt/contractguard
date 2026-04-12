@@ -9,8 +9,7 @@ import os
 from backend.db import engine, Base, SessionLocal
 from backend.models import Contract, ClauseResult, ContractRisk
 from sqlalchemy.orm import Session
-
-from worker.tasks import process_contract
+from shared.celery_app import celery_app
 
 # -------------------------------
 # Config
@@ -164,7 +163,7 @@ async def upload_contract(request: Request, file: UploadFile = File(...)):
     # -------------------------------
     # Enqueue background task   
     # -------------------------------
-    process_contract.delay(contract.id, file_path)
+    celery_app.send_task("worker.tasks.process_contract", args=[contract.id, file_path])
 
     # -------------------------------
     # Response
