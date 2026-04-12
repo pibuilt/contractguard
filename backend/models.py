@@ -2,7 +2,7 @@ from sqlalchemy import Column, Integer, String, DateTime, ForeignKey, Text, Floa
 from sqlalchemy.orm import relationship
 from sqlalchemy.dialects.sqlite import BLOB
 from datetime import datetime
-from db import Base
+from backend.db import Base
 import uuid
 
 

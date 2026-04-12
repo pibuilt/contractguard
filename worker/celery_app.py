@@ -15,4 +15,4 @@ celery_app.conf.update(
 )
 
 # IMPORTANT: ensures tasks are registered
-import tasks
+from worker import tasks

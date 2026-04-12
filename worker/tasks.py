@@ -1,15 +1,9 @@
-from celery_app import celery_app
-from db import SessionLocal
-from models import Contract, ClauseResult, ContractRisk
+from worker.celery_app import celery_app
+from backend.db import SessionLocal
+from backend.models import Contract, ClauseResult, ContractRisk
 import logging
 import os
 import uuid
-
-from services.llm_service import llm_service, build_prompt
-from services.vector_instance import vector_store
-from services.risk_detector import detect_risks
-from services.embedding_instance import embedding_service
-from services.explanation_service import generate_explanation
 
 from pdfminer.high_level import extract_text
 
@@ -73,6 +67,13 @@ def extract_clauses(text: str):
 # -------------------------------
 @celery_app.task
 def process_contract(contract_id: int, file_path: str):
+
+    from worker.services.llm_service import llm_service, build_prompt
+    from worker.services.vector_instance import vector_store
+    from worker.services.risk_detector import detect_risks
+    from worker.services.embedding_instance import embedding_service
+    from worker.services.explanation_service import generate_explanation
+
     db = SessionLocal()
 
     try:

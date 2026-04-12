@@ -6,14 +6,11 @@ import uuid
 import time
 import os
 
-from db import engine, Base, SessionLocal
-from models import Contract, ClauseResult, ContractRisk
+from backend.db import engine, Base, SessionLocal
+from backend.models import Contract, ClauseResult, ContractRisk
 from sqlalchemy.orm import Session
 
-from services.embedding_service import EmbeddingService
-from services.vector_instance import vector_store
-
-from tasks import process_contract
+from worker.tasks import process_contract
 
 # -------------------------------
 # Config
@@ -44,7 +41,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-embedding_service = EmbeddingService()
 # -------------------------------
 # Middleware
 # -------------------------------
@@ -80,7 +76,6 @@ async def add_request_id_and_logging(request: Request, call_next):
 @app.on_event("startup")
 def on_startup():
     Base.metadata.create_all(bind=engine)
-    vector_store.load("storage/faiss")
     logger.info("Database initialized")
 
 
@@ -311,7 +306,7 @@ async def http_exception_handler(request: Request, exc: HTTPException):
         }
     )
 
-@app.get("/search")
+'''@app.get("/search")
 def search_clauses(
     request: Request,
     query: str,
@@ -408,7 +403,7 @@ def search_clauses(
 
     finally:
         db.close()
-        
+'''        
 # -------------------------------
 # Global Exception Handler
 # -------------------------------

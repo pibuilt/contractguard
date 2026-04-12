@@ -1,6 +1,6 @@
 import numpy as np
-from services.risk_library import RISK_LIBRARY
-from services.embedding_instance import embedding_service
+from worker.services.risk_library import RISK_LIBRARY
+from worker.services.embedding_instance import embedding_service
 
 # Precompute risk embeddings ONCE
 RISK_HINT_EMBEDDINGS = embedding_service.encode(
