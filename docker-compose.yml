@@ -1,0 +1,38 @@
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: docker/backend.Dockerfile
+    container_name: contractguard-backend
+    ports:
+      - "8000:8000"
+    depends_on:
+      - redis
+    environment:
+      - PYTHONUNBUFFERED=1
+
+  worker:
+    build:
+      context: .
+      dockerfile: docker/worker.Dockerfile
+    container_name: contractguard-worker
+    depends_on:
+      - redis
+    environment:
+      - PYTHONUNBUFFERED=1
+
+  redis:
+    image: redis:7
+    container_name: contractguard-redis
+    ports:
+      - "6379:6379"
+
+  frontend:
+    build:
+      context: .
+      dockerfile: docker/frontend.Dockerfile
+    container_name: contractguard-frontend
+    ports:
+      - "3000:80"
+    depends_on:
+      - backend
