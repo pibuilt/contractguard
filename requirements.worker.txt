@@ -6,7 +6,6 @@ pydantic
 
 # PDF + data
 pdfminer.six
-numpy
 faiss-cpu
 numpy
 
