@@ -3,7 +3,7 @@ services:
     build:
       context: .
       dockerfile: docker/backend.Dockerfile
-    container_name: contractguard-backend
+    container_name: contractguard-backend-dev
     ports:
       - "8000:8000"
     depends_on:
@@ -18,7 +18,7 @@ services:
     build:
       context: .
       dockerfile: docker/worker.Dockerfile
-    container_name: contractguard-worker
+    container_name: contractguard-worker-dev
     depends_on:
       - redis
     environment:
@@ -37,7 +37,7 @@ services:
     build:
       context: .
       dockerfile: docker/frontend.Dockerfile
-    container_name: contractguard-frontend
+    container_name: contractguard-frontend-dev
     ports:
       - "3000:80"
     depends_on:
