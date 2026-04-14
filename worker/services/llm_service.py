@@ -182,6 +182,9 @@ Rules:
 
             parsed = parse_llm_output(raw)
 
+            if not parsed["risk_type"]:
+                parsed["risk_type"] = "Unknown"
+
             return {
                 "risk_type": parsed["risk_type"],
                 "confidence": float(parsed["confidence"]),
