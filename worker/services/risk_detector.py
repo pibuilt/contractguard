@@ -31,13 +31,19 @@ def detect_risks(clause_text: str, llm_service=None):
     if not results and llm_service:
         llm_result = llm_service.analyze_clause(clause_text)
 
-        if llm_result["confidence"] > 0.4:
-            results.append({
-                "risk_type": llm_result["risk_type"],
-                "severity": "medium",
-                "confidence": llm_result["confidence"],
-                "source": "llm",
-                "llm_data": llm_result
-            })
+        if not llm_result:
+            return results
+
+        # Filter out low confidence LLM results
+        if llm_result["confidence"] < 0.7:
+            return results
+
+        results.append({
+            "risk_type": llm_result["risk_type"],
+            "severity": "medium",
+            "confidence": llm_result["confidence"],
+            "source": "llm",
+            "llm_data": llm_result
+        })
 
     return results

@@ -28,4 +28,4 @@ COPY backend/ backend/
 COPY shared/ shared/
 
 # Run worker
-CMD ["celery", "-A", "worker.celery_app:celery_app", "worker", "--loglevel=info", "--pool=solo"]
+CMD ["celery", "-A", "worker.celery_app", "worker", "--loglevel=info", "--concurrency=1", "--prefetch-multiplier=1"]

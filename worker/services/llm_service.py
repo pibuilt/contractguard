@@ -1,7 +1,9 @@
+import time
 import os
 from openai import OpenAI
 import logging
 import re
+import random 
 
 logger = logging.getLogger(__name__)
 
@@ -27,7 +29,7 @@ def extract_float(text: str, field: str):
 
 
 def parse_llm_output(raw: str):
-    # remove markdown if present
+    # remove markdown blocks
     raw = raw.replace("```json", "").replace("```", "").strip()
 
     return {
@@ -45,21 +47,66 @@ def parse_llm_output(raw: str):
 
 class LLMService:
 
+    # -------------------------------
+    # CORE CALL (with retry + throttle)
+    # -------------------------------
+
+    def _call_llm(self, messages, max_tokens, temperature):
+
+        max_retries = 5
+        base_delay = 2  # seconds
+        max_delay = 20  # cap
+
+        for attempt in range(max_retries):
+            try:
+                time.sleep(2)  # base throttle
+
+                response = client.chat.completions.create(
+                    model="openrouter/free",
+                    messages=messages,
+                    max_tokens=max_tokens,
+                    temperature=temperature
+                )
+
+                content = response.choices[0].message.content
+                return content or ""
+
+            except Exception as e:
+                error_str = str(e)
+
+                if "429" in error_str:
+                    # exponential backoff + jitter
+                    backoff = min(max_delay, base_delay * (2 ** attempt))
+                    jitter = random.uniform(0, 1.5)
+
+                    sleep_time = backoff + jitter
+
+                    logger.warning(
+                        f"Rate limited (attempt {attempt+1}/{max_retries}). "
+                        f"Sleeping {sleep_time:.2f}s before retry..."
+                    )
+
+                    time.sleep(sleep_time)
+
+                else:
+                    logger.error(f"LLM call failed: {error_str}", exc_info=True)
+                    raise
+
+        raise Exception("LLM failed after retries")
+
+    # -------------------------------
+    # TEXT GENERATION (explanations)
+    # -------------------------------
     def generate(self, prompt: str, max_tokens: int = 120) -> str:
         print("🔥 Calling OpenRouter FREE LLM...")
 
-        try:
-            response = client.chat.completions.create(
-                model="openrouter/free",
-                messages=[{"role": "user", "content": prompt}],
-                max_tokens=max_tokens,
-                temperature=0.3
-            )
-        except Exception as e:
-            print("🔥 LLM ERROR:", str(e))
-            raise
+        content = self._call_llm(
+            messages=[{"role": "user", "content": prompt}],
+            max_tokens=max_tokens,
+            temperature=0.3
+        )
 
-        generated_text = response.choices[0].message.content or ""
+        generated_text = content or ""
 
         # CLEAN OUTPUT
         lines = generated_text.split("\n")
@@ -86,17 +133,15 @@ class LLMService:
 
         final_text = " ".join(cleaned_lines)
 
-        if len(final_text) > 0:
-            sentences = final_text.split(".")
-            sentences = [s.strip() for s in sentences if s.strip()]
+        if final_text:
+            sentences = [s.strip() for s in final_text.split(".") if s.strip()]
             final_text = ". ".join(sentences[:3]) + "."
 
         return final_text[:400].strip()
 
     # -------------------------------
-    # Structured Analysis (REGEX BASED)
+    # STRUCTURED ANALYSIS
     # -------------------------------
-
     def analyze_clause(self, clause_text: str) -> dict:
         prompt = f"""
 You are a legal risk analysis system.
@@ -122,19 +167,19 @@ Rules:
 """
 
         try:
-            response = client.chat.completions.create(
-                model="openrouter/free",
+            raw = self._call_llm(
                 messages=[{"role": "user", "content": prompt}],
                 max_tokens=200,
                 temperature=0.2
             )
 
-            content = response.choices[0].message.content or ""
-            raw = content.strip()
+            raw = raw.strip()
+            if not raw:
+                logger.warning("Empty LLM response")
+                return None
 
-            print("LLM RAW OUTPUT:", raw)
+            logger.warning(f"LLM RAW OUTPUT:\n{raw}")
 
-            # REGEX PARSING (robust against bad JSON)
             parsed = parse_llm_output(raw)
 
             return {
@@ -161,7 +206,7 @@ llm_service = LLMService()
 
 
 # -------------------------------
-# Explanation Prompt (USED ELSEWHERE)
+# Explanation Prompt
 # -------------------------------
 
 def build_prompt(clause_text: str, risk_type: str) -> str:
