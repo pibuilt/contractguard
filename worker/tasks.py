@@ -182,7 +182,7 @@ def process_contract(contract_id: int, file_path: str):
             total_risks = 0
 
             for clause in clause_objects:
-                risks = detect_risks(clause.text)
+                risks = detect_risks(clause.text, llm_service=llm_service)
 
                 if risks:
                     total_risks += len(risks)
@@ -201,18 +201,32 @@ def process_contract(contract_id: int, file_path: str):
                             )
                             continue
 
-                        prompt = build_prompt(clause.text, risk["risk_type"])
+                        # NEW: explanation depends on detection source
+                        if risk.get("source") == "llm":
+                            llm_data = risk.get("llm_data", {})
 
-                        try:
-                            llm_output = llm_service.generate(prompt)
+                            llm_output = llm_data.get("why_risky", "")
+
                             logger.info(
-                                f"llm_generated contract_id={contract_id} clause_id={clause.id}"
+                                f"llm_used_for_detection contract_id={contract_id} clause_id={clause.id}"
                             )
-                        except Exception:
-                            llm_output = generate_explanation(risk["risk_type"])
-                            logger.warning(
-                                f"llm_fallback_used contract_id={contract_id} clause_id={clause.id}"
-                            )
+
+                        else:
+                            prompt = build_prompt(clause.text, risk["risk_type"])
+
+                            try:
+                                llm_output = llm_service.generate(prompt)
+
+                                logger.info(
+                                    f"llm_generated contract_id={contract_id} clause_id={clause.id}"
+                                )
+
+                            except Exception:
+                                llm_output = generate_explanation(risk["risk_type"])
+
+                                logger.warning(
+                                    f"llm_fallback_used contract_id={contract_id} clause_id={clause.id}"
+                                )
 
                         db.add(ContractRisk(
                             id=str(uuid.uuid4()),

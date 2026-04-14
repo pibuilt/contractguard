@@ -14,5 +14,5 @@ requests
 openai
 
 # Optional (safe)
-python-dotenv
+dotenv
 typing_extensions

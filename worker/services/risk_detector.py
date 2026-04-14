@@ -6,8 +6,9 @@ def keyword_match_score(clause_text: str, keywords: list[str]) -> float:
     matches = sum(1 for kw in keywords if kw in clause_lower)
     return matches / len(keywords) if keywords else 0.0
 
+THRESHOLD = 0.5
 
-def detect_risks(clause_text: str):
+def detect_risks(clause_text: str, llm_service=None):
     if not clause_text or not clause_text.strip():
         return []
 
@@ -16,14 +17,27 @@ def detect_risks(clause_text: str):
     for risk in RISK_LIBRARY:
         kw_score = keyword_match_score(clause_text, risk["keywords"])
 
-        final_score = kw_score
-
-        if final_score > 0.3:  # slightly lower threshold
+        if kw_score >= THRESHOLD:
             results.append({
                 "risk_type": risk["risk_type"],
                 "severity": risk["severity"],
-                "confidence": round(final_score, 3),
-                "description": risk["description"]
+                "confidence": round(kw_score, 3),
+                "source": "rule"
+            })
+
+    # -------------------------------
+    # LLM fallback (NEW)
+    # -------------------------------
+    if not results and llm_service:
+        llm_result = llm_service.analyze_clause(clause_text)
+
+        if llm_result["confidence"] > 0.4:
+            results.append({
+                "risk_type": llm_result["risk_type"],
+                "severity": "medium",
+                "confidence": llm_result["confidence"],
+                "source": "llm",
+                "llm_data": llm_result
             })
 
     return results

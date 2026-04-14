@@ -1,9 +1,15 @@
 from celery import Celery
+import os
+from dotenv import load_dotenv
+
+load_dotenv()
+
+REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
 
 celery_app = Celery(
     "contractguard",
-    broker="redis://redis:6379/0",
-    backend="redis://redis:6379/0"
+    broker=REDIS_URL,
+    backend=REDIS_URL
 )
 
 celery_app.conf.update(
@@ -13,3 +19,7 @@ celery_app.conf.update(
     timezone="UTC",
     enable_utc=True,
 )
+
+celery_app.autodiscover_tasks(["worker"])
+
+print(f"🚀 Celery using REDIS_URL={REDIS_URL}")

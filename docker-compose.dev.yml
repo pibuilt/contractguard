@@ -11,6 +11,8 @@ services:
     environment:
       - PYTHONUNBUFFERED=1
       - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
+      - REDIS_URL=redis://redis:6379/0
+      - DATABASE_URL=sqlite:////app/storage/db/contracts.db
     volumes:
       - ./storage:/app/storage
 
@@ -24,6 +26,8 @@ services:
     environment:
       - PYTHONUNBUFFERED=1
       - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
+      - REDIS_URL=redis://redis:6379/0
+      - DATABASE_URL=sqlite:////app/storage/db/contracts.db
     volumes:
       - ./storage:/app/storage
 
