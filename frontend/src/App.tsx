@@ -23,6 +23,11 @@ function App() {
   };
 
   useEffect(() => {
+    // stop polling if no jobs are processing
+    if (!jobs.some((job) => job.status === "processing")) {
+      return;
+    }
+
     const interval = setInterval(() => {
       jobs.forEach((job) => {
         if (job.status === "processing") {
