@@ -6,8 +6,15 @@ import os
 import uuid
 import numpy as np
 from pdfminer.high_level import extract_text
+import hashlib
 
 logger = logging.getLogger(__name__)
+
+llm_cache = {}
+
+def get_cache_key(text: str) -> str:
+    normalized = text.lower().strip()
+    return hashlib.sha256(normalized.encode()).hexdigest()
 
 
 # -------------------------------
@@ -180,7 +187,6 @@ def process_contract(contract_id: int, file_path: str):
                 llm_data = None
                 should_call_llm = False
 
-                # Reuse if already from LLM
                 if risk.get("source") == "llm" and risk.get("llm_data"):
                     llm_data = risk["llm_data"]
 
@@ -188,34 +194,47 @@ def process_contract(contract_id: int, file_path: str):
                         f"llm_reused contract_id={contract_id} clause_id={clause.id}"
                     )
 
-                # Only call LLM for HIGH severity
                 elif risk.get("severity") == "high":
                     should_call_llm = True
 
-                # Call LLM only if needed
                 if should_call_llm:
-                    try:
-                        llm_data = llm_service.analyze_clause(clause.text)
+                    cache_key = get_cache_key(clause.text)
+
+                    # -------------------------------
+                    # 🔥 CACHE CHECK
+                    # -------------------------------
+                    if cache_key in llm_cache:
+                        llm_data = llm_cache[cache_key]
 
                         logger.info(
-                            f"llm_enrichment_called contract_id={contract_id} clause_id={clause.id}"
+                            f"llm_cache_hit contract_id={contract_id} clause_id={clause.id}"
                         )
 
-                    except Exception:
-                        llm_data = None
-                        logger.warning(
-                            f"llm_enrichment_failed contract_id={contract_id}"
-                        )
+                    else:
+                        try:
+                            llm_data = llm_service.analyze_clause(clause.text)
+
+                            if llm_data:
+                                llm_cache[cache_key] = llm_data
+
+                            logger.info(
+                                f"llm_cache_miss contract_id={contract_id} clause_id={clause.id}"
+                            )
+
+                        except Exception:
+                            llm_data = None
+                            logger.warning(
+                                f"llm_enrichment_failed contract_id={contract_id}"
+                            )
 
                 # -------------------------------
-                # Fallback (guaranteed safe)
+                # Fallback
                 # -------------------------------
                 if not llm_data:
                     explanation = generate_explanation(risk["risk_type"])
                 else:
                     explanation = llm_data.get("why_risky", "") or generate_explanation(risk["risk_type"])
 
-                # Store risk
                 db.add(ContractRisk(
                     id=str(uuid.uuid4()),
                     contract_id=contract_id,
@@ -259,7 +278,6 @@ def process_contract(contract_id: int, file_path: str):
                 f"faiss_index_failed contract_id={contract_id} error={str(e)}"
             )
 
-        # Finalize
         contract.status = "completed"
         db.commit()
 
