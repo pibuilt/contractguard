@@ -9,6 +9,7 @@ from pdfminer.high_level import extract_text
 
 logger = logging.getLogger(__name__)
 
+
 # -------------------------------
 # Text Extraction (pdfminer)
 # -------------------------------
@@ -22,7 +23,7 @@ def extract_text_from_pdf(file_path: str) -> str:
 
 
 # -------------------------------
-# Clause Extraction (structure-based)
+# Clause Extraction
 # -------------------------------
 def extract_clauses(text: str):
     clauses = []
@@ -68,7 +69,7 @@ def extract_clauses(text: str):
 @celery_app.task
 def process_contract(contract_id: int, file_path: str):
 
-    from worker.services.llm_service import llm_service, build_prompt
+    from worker.services.llm_service import llm_service
     from worker.services.vector_instance import vector_store
     from worker.services.risk_detector import detect_risks
     from worker.services.embedding_instance import embedding_service
@@ -83,71 +84,48 @@ def process_contract(contract_id: int, file_path: str):
             logger.error(f"contract_not_found contract_id={contract_id}")
             return
 
-        # 🚨 Idempotency guard
         if contract.status == "processing":
             logger.warning(f"duplicate_task_detected contract_id={contract_id}")
             return
 
-        # -------------------------------
-        # Mark as processing
-        # -------------------------------
         contract.status = "processing"
         db.commit()
 
         logger.info(f"processing_started contract_id={contract_id}")
 
-        # -------------------------------
-        # Cleanup old clauses (idempotent)
-        # -------------------------------
+        # Cleanup old data
         db.query(ClauseResult).filter(
             ClauseResult.contract_id == contract_id
         ).delete(synchronize_session=False)
-        db.commit()
-        # -------------------------------
-        # Cleanup old risks (idempotent)
-        # -------------------------------
+
         db.query(ContractRisk).filter(
             ContractRisk.contract_id == contract_id
         ).delete(synchronize_session=False)
+
         db.commit()
 
-        # -------------------------------
         # File check
-        # -------------------------------
         if not os.path.exists(file_path):
-            logger.error(
-                f"file_not_found contract_id={contract_id} path={file_path}"
-            )
-
+            logger.error(f"file_not_found contract_id={contract_id}")
             contract.status = "failed"
             db.commit()
             return
 
-        file_size = os.path.getsize(file_path)
         logger.info(
-            f"file_found contract_id={contract_id} size={file_size}"
+            f"file_found contract_id={contract_id} size={os.path.getsize(file_path)}"
         )
 
-        # -------------------------------
         # Extract text
-        # -------------------------------
         full_text = extract_text_from_pdf(file_path)
 
         logger.info(
             f"pdf_extracted contract_id={contract_id} total_chars={len(full_text)}"
         )
 
-        # -------------------------------
         # Extract clauses
-        # -------------------------------
         clauses = extract_clauses(full_text)
 
-        # Fallback
         if not clauses:
-            logger.warning(
-                f"no_structured_clauses contract_id={contract_id}, using fallback"
-            )
-
             paragraphs = [
                 p.strip()
                 for p in full_text.split("\n\n")
@@ -159,9 +137,7 @@ def process_contract(contract_id: int, file_path: str):
                 for p in paragraphs
             ]
 
-        # -------------------------------
-        # Store clauses (IMPORTANT FIX)
-        # -------------------------------
+        # Store clauses
         clause_objects = []
 
         for clause in clauses:
@@ -173,129 +149,117 @@ def process_contract(contract_id: int, file_path: str):
             db.add(obj)
             clause_objects.append(obj)
 
-        db.commit()  # IDs now available
+        db.commit()
 
         # -------------------------------
-        # 🔥 RISK DETECTION (NEW)
+        # 🔥 RISK DETECTION + ENRICHMENT
         # -------------------------------
-        try:
-            total_risks = 0
+        total_risks = 0
 
-            for clause in clause_objects:
-                risks = detect_risks(clause.text, llm_service=llm_service)
+        for clause in clause_objects:
+            risks = detect_risks(clause.text, llm_service=llm_service)
 
-                if risks:
-                    total_risks += len(risks)
+            if not risks:
+                continue
 
-                    logger.info(
-                        f"risk_detected contract_id={contract_id} "
-                        f"clause_id={clause.id} risks={len(risks)} "
-                        f"types={[r['risk_type'] for r in risks]}"
-                    )
-
-                    # ✅ NEW: Persist risks
-                    for risk in risks:
-                        if not all(k in risk for k in ["risk_type", "severity", "confidence"]):
-                            logger.warning(
-                                    f"invalid_risk_format contract_id={contract_id} clause_id={clause.id} risk={risk}"
-                            )
-                            continue
-
-                        # NEW: explanation depends on detection source
-                        if risk.get("source") == "llm":
-                            llm_data = risk.get("llm_data", {})
-
-                            llm_output = llm_data.get("why_risky", "")
-
-                            logger.info(
-                                f"llm_used_for_detection contract_id={contract_id} clause_id={clause.id}"
-                            )
-
-                        else:
-                            prompt = build_prompt(clause.text, risk["risk_type"])
-
-                            try:
-                                llm_output = llm_service.generate(prompt)
-
-                                logger.info(
-                                    f"llm_generated contract_id={contract_id} clause_id={clause.id}"
-                                )
-
-                            except Exception:
-                                llm_output = generate_explanation(risk["risk_type"])
-
-                                logger.warning(
-                                    f"llm_fallback_used contract_id={contract_id} clause_id={clause.id}"
-                                )
-
-                        db.add(ContractRisk(
-                            id=str(uuid.uuid4()),
-                            contract_id=contract_id,
-                            clause_id=clause.id,
-                            risk_type=risk["risk_type"],
-                            severity=risk["severity"],
-                            confidence=risk["confidence"],
-                            explanation=llm_output
-                        ))
-
-            # ✅ IMPORTANT: commit ONCE after loop
-            db.commit()
+            total_risks += len(risks)
 
             logger.info(
-                f"risk_summary contract_id={contract_id} total_risks={total_risks}"
+                f"risk_detected contract_id={contract_id} "
+                f"clause_id={clause.id} risks={len(risks)}"
             )
 
-        except Exception as e:
+            for risk in risks:
 
-            db.rollback()  
+                if not all(k in risk for k in ["risk_type", "severity", "confidence"]):
+                    continue
 
-            logger.error(
-                f"risk_detection_failed contract_id={contract_id} error={str(e)}",
-                exc_info=True
-            )
+                # -------------------------------
+                # 🔥 CONTROLLED LLM USAGE
+                # -------------------------------
+                llm_data = None
+                should_call_llm = False
+
+                # Reuse if already from LLM
+                if risk.get("source") == "llm" and risk.get("llm_data"):
+                    llm_data = risk["llm_data"]
+
+                    logger.info(
+                        f"llm_reused contract_id={contract_id} clause_id={clause.id}"
+                    )
+
+                # Only call LLM for HIGH severity
+                elif risk.get("severity") == "high":
+                    should_call_llm = True
+
+                # Call LLM only if needed
+                if should_call_llm:
+                    try:
+                        llm_data = llm_service.analyze_clause(clause.text)
+
+                        logger.info(
+                            f"llm_enrichment_called contract_id={contract_id} clause_id={clause.id}"
+                        )
+
+                    except Exception:
+                        llm_data = None
+                        logger.warning(
+                            f"llm_enrichment_failed contract_id={contract_id}"
+                        )
+
+                # -------------------------------
+                # Fallback (guaranteed safe)
+                # -------------------------------
+                if not llm_data:
+                    explanation = generate_explanation(risk["risk_type"])
+                else:
+                    explanation = llm_data.get("why_risky", "") or generate_explanation(risk["risk_type"])
+
+                # Store risk
+                db.add(ContractRisk(
+                    id=str(uuid.uuid4()),
+                    contract_id=contract_id,
+                    clause_id=clause.id,
+                    risk_type=risk["risk_type"],
+                    severity=risk["severity"],
+                    confidence=risk["confidence"],
+                    explanation=explanation
+                ))
+
+        db.commit()
+
+        logger.info(
+            f"risk_summary contract_id={contract_id} total_risks={total_risks}"
+        )
+
         # -------------------------------
-        # 🔥 FAISS INTEGRATION (FIXED)
+        # FAISS
         # -------------------------------
         try:
             texts = [c.text for c in clause_objects]
 
             if texts:
                 embeddings = embedding_service.encode(texts)
-
-                # ✅ convert to numpy (CRITICAL)
                 embeddings = np.array(embeddings).astype("float32")
 
                 if len(embeddings.shape) == 1:
                     embeddings = embeddings.reshape(1, -1)
 
-                valid_count = len(embeddings)
-                ids = [str(clause_objects[i].id) for i in range(valid_count)]
+                ids = [str(c.id) for c in clause_objects]
 
                 vector_store.add(embeddings, ids)
                 vector_store.save("storage/faiss")
 
                 logger.info(
-                    f"faiss_index_updated contract_id={contract_id} vectors_added={valid_count}"
+                    f"faiss_index_updated contract_id={contract_id}"
                 )
 
         except Exception as e:
             logger.error(
-                f"faiss_index_failed contract_id={contract_id} error={str(e)}",
-                exc_info=True
-            )
-        # -------------------------------
-        # Preview logs
-        # -------------------------------
-        for i, clause in enumerate(clause_objects[:3]):
-            logger.info(
-                f"clause_preview contract_id={contract_id} "
-                f"index={i} number={clause.clause_number} "
-                f"length={len(clause.text)}"
+                f"faiss_index_failed contract_id={contract_id} error={str(e)}"
             )
 
-        # -------------------------------
-        # Mark completed
-        # -------------------------------
+        # Finalize
         contract.status = "completed"
         db.commit()
 
